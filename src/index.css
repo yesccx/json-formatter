@@ -1,3 +1,21 @@
+/* JSON 输入高亮层包裹 */
+/* 已移除高亮层相关样式，还原为普通输入区 */
+
+/* 格式化失败提示条 */
+.format-error-box {
+  margin: 8px 0 0 0;
+  padding: 7px 14px;
+  background: rgba(255, 71, 71, 0.08);
+  color: #d32f2f;
+  border: 1px solid #ffcdd2;
+  border-radius: 6px;
+  font-size: 0.97em;
+  line-height: 1.6;
+  word-break: break-all;
+  box-shadow: 0 1px 2px 0 rgba(255, 71, 71, 0.04);
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -161,7 +179,7 @@ body {
   margin-top: 1rem;
   display: grid;
   /* 左侧 INPUT JSON 约占 1/4，右侧结果占 3/4 */
-  grid-template-columns: minmax(0, 1fr) minmax(0, 3fr);
+  grid-template-columns: minmax(0, 15fr) minmax(0, 25fr);
   gap: 1.25rem;
   flex: 1;
   min-height: 0;

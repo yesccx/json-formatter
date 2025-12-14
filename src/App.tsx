@@ -17,6 +17,8 @@ function App() {
   const [history, setHistory] = useState<FormatRecord[]>([]);
   const [copyPrettySuccess, setCopyPrettySuccess] = useState(false);
   const [copyMinifySuccess, setCopyMinifySuccess] = useState(false);
+  const [formatError, setFormatError] = useState<string | null>(null);
+      // 已移除高亮层，无需同步滚动和高度
   const [treeCommandId, setTreeCommandId] = useState(0);
   const [treeCommandMode, setTreeCommandMode] = useState<
     'expand' | 'collapse' | null
@@ -128,6 +130,19 @@ function App() {
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   };
 
+  const handleFormatInput = () => {
+    const trimmed = input.trim();
+    if (!trimmed) return;
+    try {
+      const parsedValue = JSON.parse(trimmed);
+      const formatted = JSON.stringify(parsedValue, null, 2);
+      setInput(formatted);
+      setFormatError(null);
+    } catch (e) {
+      setFormatError('当前输入不是合法 JSON，无法格式化');
+    }
+  };
+
   const handleToggleTree = () => {
     if (parsed === null || error) return;
     const nextMode: 'expand' | 'collapse' = allCollapsed
@@ -177,6 +192,14 @@ function App() {
                   <div className="panel-header-actions">
                     <button
                       type="button"
+                      className="panel-header-btn panel-header-btn-secondary"
+                      onClick={handleFormatInput}
+                      disabled={!input.trim()}
+                    >
+                      格式化
+                    </button>
+                    <button
+                      type="button"
                       className="panel-header-btn"
                       onClick={handleClearInput}
                       disabled={!input}
@@ -190,11 +213,15 @@ function App() {
                     className="json-input"
                     placeholder="在此粘贴或输入 JSON 文本"
                     value={input}
-                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                      setInput(e.target.value)
-                    }
+                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
+                      setInput(e.target.value);
+                      if (formatError) setFormatError(null);
+                    }}
                     spellCheck={false}
                   />
+                  {formatError && (
+                    <div className="format-error-box">{formatError}</div>
+                  )}
                   <div className="history-section">
                     <div className="history-header">
                       <span className="history-title">
