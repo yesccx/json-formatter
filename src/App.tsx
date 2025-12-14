@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { decodeNestedJson, NestedJsonError } from './utils/decodeNestedJson';
-import { JsonViewer } from './components/JsonViewer';
+import { JsonPathSegment, JsonViewer } from './components/JsonViewer';
 import {
   addRecord,
   clearHistory,
@@ -9,16 +9,27 @@ import {
 } from './utils/historyStorage';
 
 const THEME_STORAGE_KEY = 'json-formatter-theme';
+const INPUT_STORAGE_KEY = 'json-formatter:last-input';
 
 function App() {
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    try {
+      return window.localStorage.getItem(INPUT_STORAGE_KEY) ?? '';
+    } catch {
+      return '';
+    }
+  });
   const [parsed, setParsed] = useState<unknown | null>(null);
+  const [lastValid, setLastValid] = useState<unknown | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<FormatRecord[]>([]);
   const [copyPrettySuccess, setCopyPrettySuccess] = useState(false);
   const [copyMinifySuccess, setCopyMinifySuccess] = useState(false);
   const [formatError, setFormatError] = useState<string | null>(null);
-      // 已移除高亮层，无需同步滚动和高度
+  const undoStackRef = useRef<string[]>([]);
+  const redoStackRef = useRef<string[]>([]);
+  const currentInputRef = useRef('');
   const [treeCommandId, setTreeCommandId] = useState(0);
   const [treeCommandMode, setTreeCommandMode] = useState<
     'expand' | 'collapse' | null
@@ -52,6 +63,15 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(INPUT_STORAGE_KEY, input);
+    } catch {
+      // ignore
+    }
+  }, [input]);
+
+  useEffect(() => {
     const root = document.documentElement;
     root.setAttribute('data-theme', theme);
     try {
@@ -62,10 +82,64 @@ function App() {
   }, [theme]);
 
   useEffect(() => {
+    currentInputRef.current = input;
+  }, [input]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+      const isUndo = (e.ctrlKey || e.metaKey) && !e.shiftKey && key === 'z';
+      const isRedo =
+        ((e.ctrlKey || e.metaKey) && key === 'y') ||
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && key === 'z');
+      if (!isUndo && !isRedo) return;
+
+      const active = document.activeElement as HTMLElement | null;
+      const tag = active?.tagName?.toLowerCase();
+      if (tag === 'textarea' || tag === 'input' || tag === 'select') {
+        return;
+      }
+
+      if (isUndo) {
+        const stack = undoStackRef.current;
+        if (stack.length === 0) return;
+        e.preventDefault();
+        const current = currentInputRef.current;
+        const prev = stack.pop();
+        if (prev === undefined) return;
+        redoStackRef.current.push(current);
+        if (redoStackRef.current.length > 100) {
+          redoStackRef.current.shift();
+        }
+        setInput(prev);
+        return;
+      }
+
+      if (isRedo) {
+        const stack = redoStackRef.current;
+        if (stack.length === 0) return;
+        e.preventDefault();
+        const current = currentInputRef.current;
+        const next = stack.pop();
+        if (next === undefined) return;
+        undoStackRef.current.push(current);
+        if (undoStackRef.current.length > 100) {
+          undoStackRef.current.shift();
+        }
+        setInput(next);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  useEffect(() => {
     const trimmed = input.trim();
 
     if (!trimmed) {
       setParsed(null);
+      setLastValid(null);
       setError(null);
       return;
     }
@@ -74,6 +148,7 @@ function App() {
       try {
         const decoded = decodeNestedJson(trimmed);
         setParsed(decoded);
+        setLastValid(decoded);
         setError(null);
         setHistory(addRecord(trimmed));
       } catch (e) {
@@ -91,19 +166,21 @@ function App() {
 
   const handleClearInput = () => {
     if (!input) return;
+    redoStackRef.current = [];
     setInput('');
   };
 
   const copyOutput = (minify: boolean): boolean => {
-    if (parsed === null || error) return false;
+    const valueToCopy = error ? lastValid : parsed;
+    if (valueToCopy === null) return false;
     if (typeof navigator === 'undefined' || !('clipboard' in navigator)) {
       return false;
     }
 
     try {
       const text = minify
-        ? JSON.stringify(parsed)
-        : JSON.stringify(parsed, null, 4);
+        ? JSON.stringify(valueToCopy)
+        : JSON.stringify(valueToCopy, null, 4);
       void navigator.clipboard.writeText(text);
       return true;
     } catch {
@@ -136,6 +213,7 @@ function App() {
     try {
       const parsedValue = JSON.parse(trimmed);
       const formatted = JSON.stringify(parsedValue, null, 2);
+      redoStackRef.current = [];
       setInput(formatted);
       setFormatError(null);
     } catch (e) {
@@ -144,7 +222,8 @@ function App() {
   };
 
   const handleToggleTree = () => {
-    if (parsed === null || error) return;
+    const valueToUse = error ? lastValid : parsed;
+    if (valueToUse === null) return;
     const nextMode: 'expand' | 'collapse' = allCollapsed
       ? 'expand'
       : 'collapse';
@@ -152,6 +231,288 @@ function App() {
     setTreeCommandId((prev) => prev + 1);
     setAllCollapsed(nextMode === 'collapse');
   };
+
+  const updateAtPath = (
+    current: unknown,
+    path: JsonPathSegment[],
+    nextValue: unknown,
+  ): unknown => {
+    if (path.length === 0) return nextValue;
+    const [head, ...rest] = path;
+
+    if (Array.isArray(current) && typeof head === 'number') {
+      const nextArr = current.slice();
+      nextArr[head] = updateAtPath(nextArr[head], rest, nextValue);
+      return nextArr;
+    }
+
+    if (
+      current &&
+      typeof current === 'object' &&
+      !Array.isArray(current) &&
+      typeof head === 'string'
+    ) {
+      const obj = current as Record<string, unknown>;
+      return {
+        ...obj,
+        [head]: updateAtPath(obj[head], rest, nextValue),
+      };
+    }
+
+    return current;
+  };
+
+  const handleEditValue = (path: JsonPathSegment[], nextValue: unknown) => {
+    if (parsed === null || error) return;
+    undoStackRef.current.push(input);
+    if (undoStackRef.current.length > 100) {
+      undoStackRef.current.shift();
+    }
+    redoStackRef.current = [];
+    const updated = updateAtPath(parsed, path, nextValue);
+    setParsed(updated);
+    setError(null);
+    try {
+      setInput(JSON.stringify(updated, null, 2));
+    } catch {
+      // ignore
+    }
+  };
+
+  const isPlainObject = (value: unknown): value is Record<string, unknown> => {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+  };
+
+  const pushUndoSnapshot = () => {
+    undoStackRef.current.push(input);
+    if (undoStackRef.current.length > 100) {
+      undoStackRef.current.shift();
+    }
+    redoStackRef.current = [];
+  };
+
+  const commitParsedUpdate = (updated: unknown) => {
+    setParsed(updated);
+    setError(null);
+    try {
+      setInput(JSON.stringify(updated, null, 2));
+    } catch {
+      // ignore
+    }
+  };
+
+  const addToObjectAtPath = (
+    current: unknown,
+    objectPath: JsonPathSegment[],
+    key: string,
+    value: unknown,
+  ): unknown => {
+    if (objectPath.length === 0) {
+      if (!isPlainObject(current)) return current;
+      if (Object.prototype.hasOwnProperty.call(current, key)) return current;
+      return {
+        ...(current as Record<string, unknown>),
+        [key]: value,
+      };
+    }
+
+    const [head, ...rest] = objectPath;
+    if (Array.isArray(current) && typeof head === 'number') {
+      const nextArr = current.slice();
+      nextArr[head] = addToObjectAtPath(nextArr[head], rest, key, value);
+      return nextArr;
+    }
+    if (isPlainObject(current) && typeof head === 'string') {
+      const obj = current as Record<string, unknown>;
+      return {
+        ...obj,
+        [head]: addToObjectAtPath(obj[head], rest, key, value),
+      };
+    }
+
+    return current;
+  };
+
+  const addToArrayAtPath = (
+    current: unknown,
+    arrayPath: JsonPathSegment[],
+    value: unknown,
+  ): unknown => {
+    if (arrayPath.length === 0) {
+      if (!Array.isArray(current)) return current;
+      return [...current, value];
+    }
+
+    const [head, ...rest] = arrayPath;
+    if (Array.isArray(current) && typeof head === 'number') {
+      const nextArr = current.slice();
+      nextArr[head] = addToArrayAtPath(nextArr[head], rest, value);
+      return nextArr;
+    }
+    if (isPlainObject(current) && typeof head === 'string') {
+      const obj = current as Record<string, unknown>;
+      return {
+        ...obj,
+        [head]: addToArrayAtPath(obj[head], rest, value),
+      };
+    }
+
+    return current;
+  };
+
+  const deleteAtPath = (current: unknown, path: JsonPathSegment[]): unknown => {
+    if (path.length === 0) return current;
+    const [head, ...rest] = path;
+
+    if (rest.length === 0) {
+      if (Array.isArray(current) && typeof head === 'number') {
+        if (head < 0 || head >= current.length) return current;
+        const nextArr = current.slice();
+        nextArr.splice(head, 1);
+        return nextArr;
+      }
+      if (isPlainObject(current) && typeof head === 'string') {
+        if (!Object.prototype.hasOwnProperty.call(current, head)) return current;
+        const nextObj = { ...(current as Record<string, unknown>) };
+        delete nextObj[head];
+        return nextObj;
+      }
+      return current;
+    }
+
+    if (Array.isArray(current) && typeof head === 'number') {
+      const nextArr = current.slice();
+      nextArr[head] = deleteAtPath(nextArr[head], rest);
+      return nextArr;
+    }
+    if (isPlainObject(current) && typeof head === 'string') {
+      const obj = current as Record<string, unknown>;
+      return {
+        ...obj,
+        [head]: deleteAtPath(obj[head], rest),
+      };
+    }
+
+    return current;
+  };
+
+  const handleAddToObject = (
+    objectPath: JsonPathSegment[],
+    key: string,
+    value: unknown,
+  ) => {
+    if (parsed === null || error) return;
+    const trimmedKey = key.trim();
+    if (!trimmedKey) return;
+    pushUndoSnapshot();
+    const updated = addToObjectAtPath(parsed, objectPath, trimmedKey, value);
+    if (updated === parsed) return;
+    commitParsedUpdate(updated);
+  };
+
+  const handleAddToArray = (arrayPath: JsonPathSegment[], value: unknown) => {
+    if (parsed === null || error) return;
+    pushUndoSnapshot();
+    const updated = addToArrayAtPath(parsed, arrayPath, value);
+    if (updated === parsed) return;
+    commitParsedUpdate(updated);
+  };
+
+  const handleDeleteAtPath = (path: JsonPathSegment[]) => {
+    if (parsed === null || error) return;
+    if (!path.length) return;
+    pushUndoSnapshot();
+    const updated = deleteAtPath(parsed, path);
+    if (updated === parsed) return;
+    commitParsedUpdate(updated);
+  };
+
+  const renameKeyAtPath = (
+    current: unknown,
+    parentPath: JsonPathSegment[],
+    oldKey: string,
+    newKey: string,
+  ): unknown => {
+    const target = parentPath.reduce<unknown>((acc, seg) => {
+      if (acc === null || acc === undefined) return acc;
+      if (typeof seg === 'number' && Array.isArray(acc)) return acc[seg];
+      if (typeof seg === 'string' && typeof acc === 'object' && !Array.isArray(acc)) {
+        return (acc as Record<string, unknown>)[seg];
+      }
+      return acc;
+    }, current);
+
+    if (!target || typeof target !== 'object' || Array.isArray(target)) {
+      return current;
+    }
+
+    const obj = target as Record<string, unknown>;
+    if (!(oldKey in obj)) return current;
+    if (newKey in obj) {
+      // 冲突则不改
+      return current;
+    }
+
+    const patchObject = (node: unknown, pathToNode: JsonPathSegment[]): unknown => {
+      if (pathToNode.length === 0) {
+        const next: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(obj)) {
+          if (k === oldKey) {
+            next[newKey] = v;
+          } else {
+            next[k] = v;
+          }
+        }
+        return next;
+      }
+
+      const [head, ...rest] = pathToNode;
+      if (Array.isArray(node) && typeof head === 'number') {
+        const nextArr = node.slice();
+        nextArr[head] = patchObject(nextArr[head], rest);
+        return nextArr;
+      }
+      if (node && typeof node === 'object' && !Array.isArray(node) && typeof head === 'string') {
+        const nextObj = { ...(node as Record<string, unknown>) };
+        nextObj[head] = patchObject(nextObj[head], rest);
+        return nextObj;
+      }
+      return node;
+    };
+
+    return patchObject(current, parentPath);
+  };
+
+  const handleRenameKey = (
+    parentPath: JsonPathSegment[],
+    oldKey: string,
+    newKey: string,
+  ) => {
+    if (parsed === null || error) return;
+    const trimmed = newKey.trim();
+    if (!trimmed) return;
+
+    undoStackRef.current.push(input);
+    if (undoStackRef.current.length > 100) {
+      undoStackRef.current.shift();
+    }
+    redoStackRef.current = [];
+
+    const updated = renameKeyAtPath(parsed, parentPath, oldKey, trimmed);
+    if (updated === parsed) {
+      return;
+    }
+    setParsed(updated);
+    setError(null);
+    try {
+      setInput(JSON.stringify(updated, null, 2));
+    } catch {
+      // ignore
+    }
+  };
+
+  const displayValue = error ? lastValid : parsed;
+  const isReadonlyPreview = !!error;
 
   return (
     <div className="app-root">
@@ -214,6 +575,9 @@ function App() {
                     placeholder="在此粘贴或输入 JSON 文本"
                     value={input}
                     onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
+                      if (redoStackRef.current.length) {
+                        redoStackRef.current = [];
+                      }
                       setInput(e.target.value);
                       if (formatError) setFormatError(null);
                     }}
@@ -294,7 +658,7 @@ function App() {
                       type="button"
                       className="panel-header-btn panel-header-btn-secondary"
                       onClick={handleToggleTree}
-                      disabled={parsed === null || !!error}
+                      disabled={displayValue === null}
                     >
                       {allCollapsed ? '展开全部' : '折叠全部'}
                     </button>
@@ -302,7 +666,7 @@ function App() {
                       type="button"
                       className={`panel-header-btn${copyPrettySuccess ? ' panel-header-btn-success' : ''}`}
                       onClick={handleCopyPretty}
-                      disabled={parsed === null || !!error}
+                      disabled={displayValue === null}
                     >
                       {copyPrettySuccess ? '已复制' : '复制'}
                     </button>
@@ -310,23 +674,38 @@ function App() {
                       type="button"
                       className={`panel-header-btn panel-header-btn-secondary${copyMinifySuccess ? ' panel-header-btn-success' : ''}`}
                       onClick={handleCopyMinify}
-                      disabled={parsed === null || !!error}
+                      disabled={displayValue === null}
                     >
                       {copyMinifySuccess ? '已复制' : '压缩并复制'}
                     </button>
                   </div>
                 </div>
-                <div className="panel-body">
-                  {error ? (
-                    <div className="error-box">{error}</div>
-                  ) : parsed !== null ? (
+                <div className="panel-body panel-body-output">
+                  {error && <div className="panel-overlay-error error-box">{error}</div>}
+                  {displayValue !== null ? (
                     <JsonViewer
-                      value={parsed}
+                      value={displayValue}
                       treeCommandId={treeCommandId}
                       treeCommandMode={treeCommandMode}
+                      onEditValue={isReadonlyPreview ? undefined : handleEditValue}
+                      onRenameKey={isReadonlyPreview ? undefined : handleRenameKey}
+                      onAddToObject={isReadonlyPreview ? undefined : handleAddToObject}
+                      onAddToArray={isReadonlyPreview ? undefined : handleAddToArray}
+                      onDeleteAtPath={isReadonlyPreview ? undefined : handleDeleteAtPath}
                     />
                   ) : (
-                    <div className="empty-state">等待输入有效的 JSON…</div>
+                    <div className="empty-state">
+                      <p className="empty-state-title">使用说明</p>
+                      <ol className="empty-state-list">
+                        <li>在左侧粘贴或输入 JSON 文本。</li>
+                        <li>点击“格式化”可自动排版；右侧支持树形展开/折叠。</li>
+                        <li>右侧可直接编辑值、重命名 key、增删节点（仅在输入为合法 JSON 时使用右键弹出菜单）。</li>
+                        <li>“复制 / 压缩并复制”用于导出结果。</li>
+                      </ol>
+                      <p className="empty-state-hint">
+                        小提示：支持解析“JSON 字符串里套 JSON”的场景，同时会自动解析unicode、转义字符等。
+                      </p>
+                    </div>
                   )}
                 </div>
               </div>
