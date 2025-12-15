@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 export type JsonPathSegment = string | number;
 
@@ -149,8 +149,16 @@ function JsonNode({
 
   const paddingLeft = level * INDENT_PX;
 
-  // 默认全部展开，如有需要用户再手动折叠
-  const [collapsed, setCollapsed] = useState(false);
+  // 默认全部展开；但如果当前处于“折叠全部”模式，后挂载的子节点也应当默认折叠，
+  // 否则会出现：展开某一级时，子树先全展开一帧再被 effect 折叠的闪烁。
+  const [collapsed, setCollapsed] = useState(() => {
+    if (!isContainer) return false;
+    if (treeCommandMode === 'collapse') {
+      // 折叠全部时保留第 1 级可见：根节点（level=0）不折叠
+      return level > 0;
+    }
+    return false;
+  });
   const [copied, setCopied] = useState(false);
   const copyText = getCopyText(value);
 
@@ -217,11 +225,17 @@ function JsonNode({
     return 'unknown';
   }, [value]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!isContainer) return;
     if (!treeCommandMode) return;
-    setCollapsed(treeCommandMode === 'collapse');
-  }, [treeCommandId, treeCommandMode, isContainer]);
+    if (treeCommandMode === 'collapse') {
+      // 折叠全部时保留第 1 级可见：根节点（level=0）不折叠
+      setCollapsed(level > 0);
+      return;
+    }
+    // expand
+    setCollapsed(false);
+  }, [treeCommandId, treeCommandMode, isContainer, level]);
 
   useEffect(() => {
     if (!nodeAction) return;
