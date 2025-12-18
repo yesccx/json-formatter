@@ -211,13 +211,17 @@ function App() {
     const trimmed = input.trim();
     if (!trimmed) return;
     try {
-      const parsedValue = JSON.parse(trimmed);
-      const formatted = JSON.stringify(parsedValue, null, 2);
+      const decoded = decodeNestedJson(trimmed);
+      const formatted = JSON.stringify(decoded, null, 2);
       redoStackRef.current = [];
       setInput(formatted);
       setFormatError(null);
     } catch (e) {
-      setFormatError('当前输入不是合法 JSON，无法格式化');
+      if (e instanceof NestedJsonError) {
+        setFormatError(`解析失败：${e.message}`);
+      } else {
+        setFormatError('解析失败：未知错误');
+      }
     }
   };
 
