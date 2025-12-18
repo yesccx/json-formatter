@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useI18n } from '../i18n/I18nProvider';
 
 export type JsonPathSegment = string | number;
 
@@ -143,6 +144,7 @@ function JsonNode({
   onDeleteAtPath,
   onOpenContextMenu,
 }: JsonNodeProps) {
+  const { t } = useI18n();
   const isArray = Array.isArray(value);
   const isObj = isObject(value);
   const isContainer = isArray || isObj;
@@ -314,12 +316,12 @@ function JsonNode({
       if (!onAddToObject || !isObj) return;
       const key = newKey.trim();
       if (!key) {
-        setAddError('Key 不能为空');
+        setAddError(t('jsonViewer.error.keyRequired'));
         return;
       }
       const obj = value as Record<string, unknown>;
       if (Object.prototype.hasOwnProperty.call(obj, key)) {
-        setAddError('Key 已存在');
+        setAddError(t('jsonViewer.error.keyExists'));
         return;
       }
       onAddToObject(path, key, parseLooseValue(newValueText));
@@ -377,7 +379,7 @@ function JsonNode({
     if (primitiveType === 'number') {
       const num = Number(trimmed);
       if (!Number.isFinite(num)) {
-        setEditError('请输入合法数字');
+        setEditError(t('jsonViewer.error.invalidNumber'));
         return;
       }
       onEditValue(path, num);
@@ -479,7 +481,7 @@ function JsonNode({
     const oldKey = String(name);
     const nextKey = draftKey.trim();
     if (!nextKey) {
-      setKeyError('Key 不能为空');
+      setKeyError(t('jsonViewer.error.keyRequired'));
       return;
     }
     if (nextKey === oldKey) {
@@ -619,8 +621,8 @@ function JsonNode({
                     e.stopPropagation();
                     commitAdd();
                   }}
-                  aria-label="保存"
-                  title="保存"
+                  aria-label={t('jsonViewer.save')}
+                  title={t('jsonViewer.save')}
                 >
                   ✓
                 </button>
@@ -631,8 +633,8 @@ function JsonNode({
                     e.stopPropagation();
                     cancelAdd();
                   }}
-                  aria-label="取消"
-                  title="取消"
+                  aria-label={t('jsonViewer.cancel')}
+                  title={t('jsonViewer.cancel')}
                 >
                   ✕
                 </button>
@@ -668,7 +670,7 @@ function JsonNode({
 
   if (isObj) {
     const entries = Object.entries(value as Record<string, unknown>);
-    const summary = `{${entries.length} key${entries.length === 1 ? '' : 's'}}`;
+    const summary = `{${entries.length} keys}`;
 
     return (
       <div className="json-node">
@@ -718,7 +720,7 @@ function JsonNode({
                   className="json-edit-input json-key-edit-input"
                   value={newKey}
                   onChange={(e) => setNewKey(e.target.value)}
-                  placeholder="key"
+                  placeholder={t('jsonViewer.keyPlaceholder')}
                   onKeyDown={(e) => {
                     if (e.key === 'Escape') {
                       e.preventDefault();
@@ -736,7 +738,7 @@ function JsonNode({
                   className="json-edit-input"
                   value={newValueText}
                   onChange={(e) => setNewValueText(e.target.value)}
-                  placeholder="value"
+                  placeholder={t('jsonViewer.valuePlaceholder')}
                   onKeyDown={(e) => {
                     if (e.key === 'Escape') {
                       e.preventDefault();
@@ -755,8 +757,8 @@ function JsonNode({
                     e.stopPropagation();
                     commitAdd();
                   }}
-                  aria-label="保存"
-                  title="保存"
+                  aria-label={t('jsonViewer.save')}
+                  title={t('jsonViewer.save')}
                 >
                   ✓
                 </button>
@@ -767,8 +769,8 @@ function JsonNode({
                     e.stopPropagation();
                     cancelAdd();
                   }}
-                  aria-label="取消"
-                  title="取消"
+                  aria-label={t('jsonViewer.cancel')}
+                  title={t('jsonViewer.cancel')}
                 >
                   ✕
                 </button>
@@ -920,6 +922,7 @@ export function JsonViewer({
   onAddToArray,
   onDeleteAtPath,
 }: JsonViewerProps) {
+  const { t } = useI18n();
   const [contextMenu, setContextMenu] = useState<JsonContextMenuState | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const [nodeAction, setNodeAction] = useState<JsonNodeAction>(null);
@@ -998,7 +1001,7 @@ export function JsonViewer({
                 setContextMenu(null);
               }}
             >
-              新增属性
+              {t('jsonViewer.addProperty')}
             </button>
           )}
           {contextMenu.canAddArray && (
@@ -1012,7 +1015,7 @@ export function JsonViewer({
                 setContextMenu(null);
               }}
             >
-              新增数组项
+              {t('jsonViewer.addArrayItem')}
             </button>
           )}
           {contextMenu.canDelete && (
@@ -1026,7 +1029,7 @@ export function JsonViewer({
                 setContextMenu(null);
               }}
             >
-              删除
+              {t('jsonViewer.delete')}
             </button>
           )}
         </div>

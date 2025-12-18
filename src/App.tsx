@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { decodeNestedJson, NestedJsonError } from './utils/decodeNestedJson';
 import { JsonPathSegment, JsonViewer } from './components/JsonViewer';
+import { useI18n } from './i18n/I18nProvider';
+import type { Locale } from './i18n/messages';
 import {
   addRecord,
   clearHistory,
@@ -12,6 +14,7 @@ const THEME_STORAGE_KEY = 'json-formatter-theme';
 const INPUT_STORAGE_KEY = 'json-formatter:last-input';
 
 function App() {
+  const { locale, setLocale, t } = useI18n();
   const [input, setInput] = useState(() => {
     if (typeof window === 'undefined') return '';
     try {
@@ -80,6 +83,60 @@ function App() {
       // ignore
     }
   }, [theme]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    const setMetaByName = (name: string, content: string) => {
+      let el = document.querySelector(`meta[name="${name}"]`) as HTMLMetaElement | null;
+      if (!el) {
+        el = document.createElement('meta');
+        el.setAttribute('name', name);
+        document.head.appendChild(el);
+      }
+      el.setAttribute('content', content);
+    };
+
+    const setMetaByProperty = (property: string, content: string) => {
+      let el = document.querySelector(
+        `meta[property="${property}"]`,
+      ) as HTMLMetaElement | null;
+      if (!el) {
+        el = document.createElement('meta');
+        el.setAttribute('property', property);
+        document.head.appendChild(el);
+      }
+      el.setAttribute('content', content);
+    };
+
+    const title = t('seo.title');
+    const description = t('seo.description');
+
+    document.documentElement.setAttribute('lang', locale);
+    document.title = title;
+
+    setMetaByName('description', description);
+    setMetaByProperty('og:title', title);
+    setMetaByProperty('og:description', description);
+    setMetaByName('twitter:title', title);
+    setMetaByName('twitter:description', description);
+
+    const ld = document.querySelector(
+      'script[type="application/ld+json"]',
+    ) as HTMLScriptElement | null;
+    if (ld?.textContent) {
+      try {
+        const parsed = JSON.parse(ld.textContent) as any;
+        if (parsed && typeof parsed === 'object') {
+          parsed.description = description;
+          parsed.name = 'JSON Formatter';
+          ld.textContent = JSON.stringify(parsed, null, 2);
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }, [locale, t]);
 
   useEffect(() => {
     currentInputRef.current = input;
@@ -153,9 +210,9 @@ function App() {
         setHistory(addRecord(trimmed));
       } catch (e) {
         if (e instanceof NestedJsonError) {
-          setError(`解析失败：${e.message}`);
+          setError(t('error.parseFailed', { message: e.message }));
         } else {
-          setError('解析失败：未知错误');
+          setError(t('error.parseFailedUnknown'));
         }
         setParsed(null);
       }
@@ -218,9 +275,9 @@ function App() {
       setFormatError(null);
     } catch (e) {
       if (e instanceof NestedJsonError) {
-        setFormatError(`解析失败：${e.message}`);
+        setFormatError(t('error.parseFailed', { message: e.message }));
       } else {
-        setFormatError('解析失败：未知错误');
+        setFormatError(t('error.parseFailedUnknown'));
       }
     }
   };
@@ -525,13 +582,13 @@ function App() {
           <div className="tool-card">
             <div className="tool-card-header">
               <div className="tool-card-title">
-                <h1>JSON Formatter</h1>
+                <h1>{t('app.h1')}</h1>
                 <button
                   type="button"
                   className="theme-toggle-btn"
                   onClick={handleToggleTheme}
                   aria-label={
-                    theme === 'dark' ? '切换到亮色主题' : '切换到暗色主题'
+                    theme === 'dark' ? t('app.themeToLight') : t('app.themeToDark')
                   }
                 >
                   <span className="theme-toggle-icon" aria-hidden="true">
@@ -539,21 +596,33 @@ function App() {
                   </span>
                 </button>
               </div>
-              <a
-                className="github-link"
-                href="https://github.com/yesccx/json-formatter"
-                target="_blank"
-                rel="noreferrer"
-                aria-label="在 GitHub 查看 json-formatter 源码"
-              >
-                <span aria-hidden="true">GitHub</span>
-              </a>
+              <div className="tool-card-actions">
+                <button
+                  type="button"
+                  className="lang-toggle-btn"
+                  aria-label={t('app.language')}
+                  onClick={() => {
+                    setLocale((locale === 'zh-CN' ? 'en' : 'zh-CN') as Locale);
+                  }}
+                >
+                  {locale === 'zh-CN' ? '中文' : 'EN'}
+                </button>
+                <a
+                  className="github-link"
+                  href="https://github.com/yesccx/json-formatter"
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label={t('app.githubAria')}
+                >
+                  <span aria-hidden="true">GitHub</span>
+                </a>
+              </div>
             </div>
 
             <div className="tool-grid">
               <div className="panel">
                 <div className="panel-header">
-                  <span className="panel-header-title">Input JSON</span>
+                  <span className="panel-header-title">{t('panel.inputTitle')}</span>
                   <div className="panel-header-actions">
                     <button
                       type="button"
@@ -561,7 +630,7 @@ function App() {
                       onClick={handleFormatInput}
                       disabled={!input.trim()}
                     >
-                      格式化
+                      {t('btn.format')}
                     </button>
                     <button
                       type="button"
@@ -569,14 +638,14 @@ function App() {
                       onClick={handleClearInput}
                       disabled={!input}
                     >
-                      清空输入
+                      {t('btn.clearInput')}
                     </button>
                   </div>
                 </div>
                 <div className="panel-body panel-body-input">
                   <textarea
                     className="json-input"
-                    placeholder="在此粘贴或输入 JSON 文本"
+                    placeholder={t('input.placeholder')}
                     value={input}
                     onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
                       if (redoStackRef.current.length) {
@@ -593,7 +662,7 @@ function App() {
                   <div className="history-section">
                     <div className="history-header">
                       <span className="history-title">
-                        格式化记录
+                        {t('history.title')}
                         <span className="history-title-hint">
                             {history.length}/100
                         </span>
@@ -604,20 +673,20 @@ function App() {
                           className="history-clear-btn"
                           onClick={() => {
                             if (
-                              window.confirm('确定要清空所有格式化记录吗？')
+                              window.confirm(t('history.clearConfirm'))
                             ) {
                               clearHistory();
                               setHistory([]);
                             }
                           }}
                         >
-                          清空
+                          {t('history.clear')}
                         </button>
                       )}
                     </div>
                     {history.length === 0 ? (
                       <div className="history-empty">
-                        暂无记录，格式化后会记录在这里（最多保存 100 条）
+                        {t('history.empty')}
                       </div>
                     ) : (
                       <ul className="history-list">
@@ -656,7 +725,7 @@ function App() {
 
               <div className="panel">
                 <div className="panel-header">
-                  <span className="panel-header-title">Formatted JSON</span>
+                  <span className="panel-header-title">{t('panel.outputTitle')}</span>
                   <div className="panel-header-actions">
                     <button
                       type="button"
@@ -664,7 +733,7 @@ function App() {
                       onClick={handleToggleTree}
                       disabled={displayValue === null}
                     >
-                      {allCollapsed ? '展开全部' : '折叠全部'}
+                      {allCollapsed ? t('btn.expandAll') : t('btn.collapseAll')}
                     </button>
                     <button
                       type="button"
@@ -672,7 +741,7 @@ function App() {
                       onClick={handleCopyPretty}
                       disabled={displayValue === null}
                     >
-                      {copyPrettySuccess ? '已复制' : '复制'}
+                      {copyPrettySuccess ? t('btn.copied') : t('btn.copy')}
                     </button>
                     <button
                       type="button"
@@ -680,7 +749,7 @@ function App() {
                       onClick={handleCopyMinify}
                       disabled={displayValue === null}
                     >
-                      {copyMinifySuccess ? '已复制' : '压缩并复制'}
+                      {copyMinifySuccess ? t('btn.copied') : t('btn.copyMinify')}
                     </button>
                   </div>
                 </div>
@@ -699,15 +768,15 @@ function App() {
                     />
                   ) : (
                     <div className="empty-state">
-                      <p className="empty-state-title">使用说明</p>
+                      <p className="empty-state-title">{t('empty.title')}</p>
                       <ol className="empty-state-list">
-                        <li>在左侧粘贴或输入 JSON 文本。</li>
-                        <li>点击“格式化”可自动排版；右侧支持树形展开/折叠。</li>
-                        <li>右侧可直接编辑值、重命名 key、增删节点（仅在输入为合法 JSON 时使用右键弹出菜单）。</li>
-                        <li>“复制 / 压缩并复制”用于导出结果。</li>
+                        <li>{t('empty.step1')}</li>
+                        <li>{t('empty.step2')}</li>
+                        <li>{t('empty.step3')}</li>
+                        <li>{t('empty.step4')}</li>
                       </ol>
                       <p className="empty-state-hint">
-                        小提示：支持解析“JSON 字符串里套 JSON”的场景，同时会自动解析unicode、转义字符等。
+                        {t('empty.hint')}
                       </p>
                     </div>
                   )}
