@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../i18n/I18nProvider';
+import { IconCheck, IconCopy, IconPlus, IconTrash, IconX } from './Icons';
 
 export type JsonPathSegment = string | number;
 
@@ -581,7 +582,7 @@ function JsonNode({
               type="button"
               onClick={handleCopyClick}
             >
-              {copied ? '✓' : '⧉'}
+              {copied ? <IconCheck className="btn-icon" /> : <IconCopy className="btn-icon" />}
             </button>
           )}
         </div>
@@ -624,7 +625,7 @@ function JsonNode({
                   aria-label={t('jsonViewer.save')}
                   title={t('jsonViewer.save')}
                 >
-                  ✓
+                  <IconCheck className="btn-icon" />
                 </button>
                 <button
                   type="button"
@@ -636,7 +637,7 @@ function JsonNode({
                   aria-label={t('jsonViewer.cancel')}
                   title={t('jsonViewer.cancel')}
                 >
-                  ✕
+                  <IconX className="btn-icon" />
                 </button>
                 {addError && <span className="json-edit-error">{addError}</span>}
               </span>
@@ -699,7 +700,7 @@ function JsonNode({
               type="button"
               onClick={handleCopyClick}
             >
-              {copied ? '✓' : '⧉'}
+              {copied ? <IconCheck className="btn-icon" /> : <IconCopy className="btn-icon" />}
             </button>
           )}
         </div>
@@ -760,7 +761,7 @@ function JsonNode({
                   aria-label={t('jsonViewer.save')}
                   title={t('jsonViewer.save')}
                 >
-                  ✓
+                  <IconCheck className="btn-icon" />
                 </button>
                 <button
                   type="button"
@@ -772,7 +773,7 @@ function JsonNode({
                   aria-label={t('jsonViewer.cancel')}
                   title={t('jsonViewer.cancel')}
                 >
-                  ✕
+                  <IconX className="btn-icon" />
                 </button>
                 {addError && <span className="json-edit-error">{addError}</span>}
               </span>
@@ -904,7 +905,7 @@ function JsonNode({
             type="button"
             onClick={handleCopyClick}
           >
-            {copied ? '✓' : '⧉'}
+            {copied ? <IconCheck className="btn-icon" /> : <IconCopy className="btn-icon" />}
           </button>
         )}
       </div>
@@ -923,10 +924,36 @@ export function JsonViewer({
   onDeleteAtPath,
 }: JsonViewerProps) {
   const { t } = useI18n();
+  const POPOVER_ANIM_MS = 140;
   const [contextMenu, setContextMenu] = useState<JsonContextMenuState | null>(null);
+  const [contextMenuLeaving, setContextMenuLeaving] = useState(false);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  const contextMenuTimerRef = useRef<number | null>(null);
   const [nodeAction, setNodeAction] = useState<JsonNodeAction>(null);
   const nodeActionSeqRef = useRef(0);
+
+  useEffect(() => {
+    return () => {
+      if (contextMenuTimerRef.current) window.clearTimeout(contextMenuTimerRef.current);
+    };
+  }, []);
+
+  const closeContextMenu = (immediate = false) => {
+    if (!contextMenu) return;
+    if (contextMenuTimerRef.current) window.clearTimeout(contextMenuTimerRef.current);
+
+    if (immediate) {
+      setContextMenuLeaving(false);
+      setContextMenu(null);
+      return;
+    }
+
+    setContextMenuLeaving(true);
+    contextMenuTimerRef.current = window.setTimeout(() => {
+      setContextMenu(null);
+      setContextMenuLeaving(false);
+    }, POPOVER_ANIM_MS);
+  };
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -934,22 +961,22 @@ export function JsonViewer({
     const handleMouseDown = (e: MouseEvent) => {
       const menuEl = contextMenuRef.current;
       if (!menuEl) {
-        setContextMenu(null);
+        closeContextMenu();
         return;
       }
       if (e.target instanceof Node && !menuEl.contains(e.target)) {
-        setContextMenu(null);
+        closeContextMenu();
       }
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setContextMenu(null);
+        closeContextMenu();
       }
     };
 
-    const handleResize = () => setContextMenu(null);
-    const handleScroll = () => setContextMenu(null);
+    const handleResize = () => closeContextMenu();
+    const handleScroll = () => closeContextMenu();
 
     window.addEventListener('mousedown', handleMouseDown);
     window.addEventListener('scroll', handleScroll, true);
@@ -974,6 +1001,8 @@ export function JsonViewer({
     const MENU_H = 132;
     const x = clamp(state.x, 8, window.innerWidth - MENU_W - 8);
     const y = clamp(state.y, 8, window.innerHeight - MENU_H - 8);
+    if (contextMenuTimerRef.current) window.clearTimeout(contextMenuTimerRef.current);
+    setContextMenuLeaving(false);
     setContextMenu({ ...state, x, y });
   };
 
@@ -982,7 +1011,7 @@ export function JsonViewer({
       {contextMenu && (
         <div
           ref={contextMenuRef}
-          className="json-context-menu"
+          className={`json-context-menu${contextMenuLeaving ? ' is-leaving' : ''}`}
           style={{ left: contextMenu.x, top: contextMenu.y }}
           role="menu"
           onContextMenu={(e) => {
@@ -998,10 +1027,13 @@ export function JsonViewer({
               onClick={(e) => {
                 e.stopPropagation();
                 issueNodeAction({ type: 'add-object', path: contextMenu.path });
-                setContextMenu(null);
+                closeContextMenu();
               }}
             >
-              {t('jsonViewer.addProperty')}
+              <span className="btn-content">
+                <IconPlus className="btn-icon" />
+                <span>{t('jsonViewer.addProperty')}</span>
+              </span>
             </button>
           )}
           {contextMenu.canAddArray && (
@@ -1012,10 +1044,13 @@ export function JsonViewer({
               onClick={(e) => {
                 e.stopPropagation();
                 issueNodeAction({ type: 'add-array', path: contextMenu.path });
-                setContextMenu(null);
+                closeContextMenu();
               }}
             >
-              {t('jsonViewer.addArrayItem')}
+              <span className="btn-content">
+                <IconPlus className="btn-icon" />
+                <span>{t('jsonViewer.addArrayItem')}</span>
+              </span>
             </button>
           )}
           {contextMenu.canDelete && (
@@ -1026,10 +1061,13 @@ export function JsonViewer({
               onClick={(e) => {
                 e.stopPropagation();
                 onDeleteAtPath?.(contextMenu.path);
-                setContextMenu(null);
+                closeContextMenu();
               }}
             >
-              {t('jsonViewer.delete')}
+              <span className="btn-content">
+                <IconTrash className="btn-icon" />
+                <span>{t('jsonViewer.delete')}</span>
+              </span>
             </button>
           )}
         </div>

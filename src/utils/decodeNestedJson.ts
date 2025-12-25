@@ -1,6 +1,17 @@
 export class NestedJsonError extends Error {}
 
+function looksLikeNestedJsonString(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  const ch = trimmed[0];
+  // Only attempt nested decoding for typical JSON containers / string literals.
+  // This avoids converting numeric strings like "2222..." into Numbers (which then
+  // render as scientific notation and lose precision).
+  return ch === '{' || ch === '[' || ch === '"';
+}
+
 function tryParseJson(value: string): unknown | undefined {
+  if (!looksLikeNestedJsonString(value)) return undefined;
   try {
     return JSON.parse(value);
   } catch {
