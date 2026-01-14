@@ -262,6 +262,7 @@ const OutputPanel = React.memo(function OutputPanel({
   onAddToArray,
   onDeleteAtPath,
   onEditAtPointer,
+  visible,
 }: {
   displayValue: unknown | null;
   errorText: string | null;
@@ -280,6 +281,7 @@ const OutputPanel = React.memo(function OutputPanel({
   onAddToArray?: (arrayPath: JsonPathSegment[], value: unknown) => void;
   onDeleteAtPath?: (path: JsonPathSegment[]) => void;
   onEditAtPointer?: (pointer: string, nextValue: unknown) => void;
+  visible: boolean;
 }) {
   const { t } = useI18n();
   const [copyPrettySuccess, setCopyPrettySuccess] = useState(false);
@@ -331,7 +333,7 @@ const OutputPanel = React.memo(function OutputPanel({
   };
 
   return (
-    <div className="panel">
+    <div className="panel" style={{ display: visible ? undefined : 'none' }}>
       <div className="panel-header">
         <span className="panel-header-title">{t('panel.outputTitle')}</span>
         <div className="panel-header-actions">
@@ -587,6 +589,9 @@ function App() {
   const error = activeTab?.error ?? null;
   const formatError = activeTab?.formatError ?? null;
 
+  const callbackStateRef = useRef({ activeTab, parsed, error });
+  callbackStateRef.current = { activeTab, parsed, error };
+
   const [inputSizeText, setInputSizeText] = useState('0.00KB');
 
   useEffect(() => {
@@ -809,43 +814,67 @@ function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
+  const prevActiveTabIdRef = useRef<string | null>(activeTabId);
+
   useEffect(() => {
     const trimmed = input.trim();
     const targetTabId = activeTab?.id ?? null;
     if (!targetTabId) return;
 
+    // 检测是否刚刚切换 Tab
+    const isTabSwitch = targetTabId !== prevActiveTabIdRef.current;
+    prevActiveTabIdRef.current = targetTabId;
+
+    // 如果未输入任何内容
     if (!trimmed) {
-      setTabs((prevTabs) =>
-        prevTabs.map((tab) =>
-          tab.id === targetTabId
-            ? {
+      // 只有当前解析状态不为空时才去清空，避免重复更新
+      if (activeTab && (activeTab.parsed !== null || activeTab.error !== null)) {
+        setTabs((prevTabs) =>
+          prevTabs.map((tab) =>
+            tab.id === targetTabId
+              ? {
                 ...tab,
                 parsed: null,
                 lastValid: null,
                 error: null,
               }
-            : tab,
-        ),
-      );
+              : tab,
+          ),
+        );
+      }
       return;
+    }
+
+    // 重点优化：如果是切换Tab操作，且该Tab已有解析结果（或报错），跳过重复解析。
+    // 这避免了切换Tab时的大量计算卡顿，防止生成重复的历史记录。
+    if (isTabSwitch) {
+      if (activeTab && (activeTab.parsed !== null || activeTab.error !== null)) {
+        return;
+      }
     }
 
     const timeoutId = window.setTimeout(() => {
       try {
         const decoded = decodeNestedJson(trimmed);
         setTabs((prevTabs) =>
-          prevTabs.map((tab) =>
-            tab.id === targetTabId
-              ? {
-                  ...tab,
-                  parsed: decoded,
-                  lastValid: decoded,
-                  error: null,
-                }
-              : tab,
-          ),
+          prevTabs.map((tab) => {
+            // 确保更新的是发起请求时的那个 Tab
+            // 虽然 React 更新是异步的，但这里的 closure 里的 targetTabId 是正确的
+            if (tab.id !== targetTabId) return tab;
+            return {
+              ...tab,
+              parsed: decoded,
+              lastValid: decoded,
+              error: null,
+            };
+          }),
         );
-        setHistory(addRecord(trimmed));
+        // 只有非切换 Tab 的动作（即用户编辑）才添加历史记录
+        // 如果是初始化加载的 Tab（isTabSwitch=true 但 parsed=null），
+        // 第一次解析是否要加历史？通常初次加载不需要加到“最近操作”里，除非用户改动。
+        if (!isTabSwitch) {
+            setHistory(addRecord(trimmed));
+        }
       } catch (e) {
         setTabs((prevTabs) =>
           prevTabs.map((tab) => {
@@ -865,7 +894,7 @@ function App() {
     }, 300);
 
     return () => window.clearTimeout(timeoutId);
-  }, [input]);
+  }, [input, activeTabId]); // 依赖中加上 activeTabId 以便在切换时触发逻辑，activeTab 用于内部状态判断不用加到依赖避免循环
 
   const handleClearInput = () => {
     if (!input) return;
@@ -1017,6 +1046,7 @@ function App() {
 
   const handleEditValue = useCallback(
     (path: JsonPathSegment[], nextValue: unknown) => {
+      const { parsed, error, activeTab } = callbackStateRef.current;
       if (parsed === null || error) return;
       const tabId = activeTab?.id;
       if (!tabId) return;
@@ -1024,21 +1054,23 @@ function App() {
       const updated = updateAtPath(parsed, path, nextValue);
       commitParsedUpdate(tabId, updated);
     },
-    [activeTab?.id, commitParsedUpdate, error, parsed, pushUndoSnapshot],
+    [commitParsedUpdate, pushUndoSnapshot],
   );
 
   const handleEditAtPointer = useCallback(
     (pointer: string, nextValue: unknown) => {
+      const { parsed } = callbackStateRef.current;
       if (parsed === null) return;
       const path = jsonPointerToPath(pointer, parsed);
       if (!path) return;
       handleEditValue(path, nextValue);
     },
-    [handleEditValue, parsed],
+    [handleEditValue],
   );
 
   const handleAddToObject = useCallback(
     (objectPath: JsonPathSegment[], key: string, value: unknown) => {
+      const { parsed, error, activeTab } = callbackStateRef.current;
       if (parsed === null || error) return;
       const trimmedKey = key.trim();
       if (!trimmedKey) return;
@@ -1049,11 +1081,12 @@ function App() {
       if (updated === parsed) return;
       commitParsedUpdate(tabId, updated);
     },
-    [activeTab?.id, commitParsedUpdate, error, parsed, pushUndoSnapshot],
+    [commitParsedUpdate, pushUndoSnapshot],
   );
 
   const handleAddToArray = useCallback(
     (arrayPath: JsonPathSegment[], value: unknown) => {
+      const { parsed, error, activeTab } = callbackStateRef.current;
       if (parsed === null || error) return;
       const tabId = activeTab?.id;
       if (!tabId) return;
@@ -1062,11 +1095,12 @@ function App() {
       if (updated === parsed) return;
       commitParsedUpdate(tabId, updated);
     },
-    [activeTab?.id, commitParsedUpdate, error, parsed, pushUndoSnapshot],
+    [commitParsedUpdate, pushUndoSnapshot],
   );
 
   const handleDeleteAtPath = useCallback(
     (path: JsonPathSegment[]) => {
+      const { parsed, error, activeTab } = callbackStateRef.current;
       if (parsed === null || error) return;
       if (!path.length) return;
       const tabId = activeTab?.id;
@@ -1076,11 +1110,12 @@ function App() {
       if (updated === parsed) return;
       commitParsedUpdate(tabId, updated);
     },
-    [activeTab?.id, commitParsedUpdate, error, parsed, pushUndoSnapshot],
+    [commitParsedUpdate, pushUndoSnapshot],
   );
 
   const handleRenameKey = useCallback(
     (parentPath: JsonPathSegment[], oldKey: string, newKey: string) => {
+      const { parsed, error, activeTab } = callbackStateRef.current;
       if (parsed === null || error) return;
       const trimmed = newKey.trim();
       if (!trimmed) return;
@@ -1092,7 +1127,7 @@ function App() {
       if (updated === parsed) return;
       commitParsedUpdate(tabId, updated);
     },
-    [activeTab?.id, commitParsedUpdate, error, parsed, pushUndoSnapshot],
+    [commitParsedUpdate, pushUndoSnapshot],
   );
 
   const displayValue = error ? lastValid : parsed;
@@ -1375,17 +1410,26 @@ function App() {
                 onDoubleClick={resetLayout}
               />
 
-              <OutputPanel
-                displayValue={displayValue}
-                errorText={error}
-                isReadonlyPreview={isReadonlyPreview}
-                onEditValue={handleEditValue}
-                onRenameKey={handleRenameKey}
-                onAddToObject={handleAddToObject}
-                onAddToArray={handleAddToArray}
-                onDeleteAtPath={handleDeleteAtPath}
-                onEditAtPointer={isReadonlyPreview ? undefined : handleEditAtPointer}
-              />
+              {tabs.map((tab) => {
+                const isActive = tab.id === activeTabId;
+                const dv = tab.error ? tab.lastValid : tab.parsed;
+                const isRo = !!tab.error;
+                return (
+                  <OutputPanel
+                    key={tab.id}
+                    visible={isActive}
+                    displayValue={dv}
+                    errorText={tab.error}
+                    isReadonlyPreview={isRo}
+                    onEditValue={handleEditValue}
+                    onRenameKey={handleRenameKey}
+                    onAddToObject={handleAddToObject}
+                    onAddToArray={handleAddToArray}
+                    onDeleteAtPath={handleDeleteAtPath}
+                    onEditAtPointer={isRo ? undefined : handleEditAtPointer}
+                  />
+                );
+              })}
             </div>
           </div>
         </section>

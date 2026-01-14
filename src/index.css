@@ -2219,3 +2219,31 @@ body,
   margin: 4px 0;
 }
 
+
+.json-line-more {
+  padding: 4px 0 4px 0;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 0.9em;
+  font-style: italic;
+  display: flex;
+  align-items: center;
+  user-select: none;
+}
+.json-line-more:hover {
+  color: var(--accent);
+  background: var(--bg-card); /* or highlight slightly */
+}
+.json-more-btn {
+  margin-left: 20px; /* basic indent visually */
+  border-bottom: 1px dashed currentColor;
+}
+
+
+/* Force visibility for debug */
+.json-line-more {
+  display: flex !important;
+  color: var(--accent) !important;
+  font-weight: bold;
+}
+

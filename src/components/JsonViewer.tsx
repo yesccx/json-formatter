@@ -129,7 +129,67 @@ function parseLooseValue(text: string): unknown {
   }
 }
 
-function JsonNode({
+function areJsonNodePropsEqual(prev: JsonNodeProps, next: JsonNodeProps) {
+  if (prev.value !== next.value) return false;
+  if (!pathsEqual(prev.path, next.path)) return false;
+  if (prev.treeCommandId !== next.treeCommandId) return false;
+  if (prev.treeCommandMode !== next.treeCommandMode) return false;
+
+  const pa = prev.nodeAction;
+  const na = next.nodeAction;
+  if (pa !== na) {
+    if (!pa || !na) return false;
+    if (pa.id !== na.id) return false;
+  }
+
+  if (prev.level !== next.level) return false;
+  if (prev.parentKind !== next.parentKind) return false;
+
+  return true;
+}
+
+const JsonNode = React.memo(JsonNodeInner, areJsonNodePropsEqual);
+
+const PAGE_SIZE = 50;
+
+function JsonList({
+  items,
+  renderItem,
+}: {
+  items: unknown[];
+  renderItem: (item: unknown, index: number) => React.ReactNode;
+}) {
+  const [limit, setLimit] = useState(PAGE_SIZE);
+  const visibleItems = items.slice(0, limit);
+  const remaining = items.length - limit;
+
+  // Debug pagination
+  // console.log('JsonList render:', { total: items.length, limit, remaining });
+
+  return (
+    <>
+      {visibleItems.map(renderItem)}
+      {remaining > 0 && (
+        <div
+          className="json-line-more"
+          onClick={(e) => {
+            e.stopPropagation();
+            setLimit((l) => l + PAGE_SIZE);
+          }}
+          role="button"
+          tabIndex={0}
+          style={{ paddingLeft: 14 }} // Indent to match children
+        >
+          <span className="json-more-btn">
+            Show more... ({remaining} items hidden)
+          </span>
+        </div>
+      )}
+    </>
+  );
+}
+
+function JsonNodeInner({
   name,
   value,
   level,
@@ -157,9 +217,12 @@ function JsonNode({
   const [collapsed, setCollapsed] = useState(() => {
     if (!isContainer) return false;
     if (treeCommandMode === 'collapse') {
-      // 折叠全部时保留第 1 级可见：根节点（level=0）不折叠
       return level > 0;
     }
+    // 默认折叠策略：超过3层深度的节点默认折叠
+    // 这样能显著减少大文件初始渲染的 DOM 数量
+    if (level >= 3) return true;
+
     return false;
   });
   const [copied, setCopied] = useState(false);
@@ -644,27 +707,31 @@ function JsonNode({
             </span>
           </div>
         )}
-        {!collapsed &&
-          items.map((item, index) => (
-            <JsonNode
-              // eslint-disable-next-line react/no-array-index-key
-              key={index}
-              name={String(index)}
-              value={item}
-              level={level + 1}
-              treeCommandId={treeCommandId}
-              treeCommandMode={treeCommandMode}
-              nodeAction={nodeAction}
-              path={[...path, index]}
-              parentKind="array"
-              onEditValue={onEditValue}
-              onRenameKey={onRenameKey}
-              onAddToObject={onAddToObject}
-              onAddToArray={onAddToArray}
-              onDeleteAtPath={onDeleteAtPath}
-              onOpenContextMenu={onOpenContextMenu}
-            />
-          ))}
+        {!collapsed && (
+          <JsonList
+            items={items}
+            renderItem={(item, index) => (
+              <JsonNode
+                // eslint-disable-next-line react/no-array-index-key
+                key={index}
+                name={String(index)}
+                value={item}
+                level={level + 1}
+                treeCommandId={treeCommandId}
+                treeCommandMode={treeCommandMode}
+                nodeAction={nodeAction}
+                path={[...path, index]}
+                parentKind="array"
+                onEditValue={onEditValue}
+                onRenameKey={onRenameKey}
+                onAddToObject={onAddToObject}
+                onAddToArray={onAddToArray}
+                onDeleteAtPath={onDeleteAtPath}
+                onOpenContextMenu={onOpenContextMenu}
+              />
+            )}
+          />
+        )}
       </div>
     );
   }
@@ -780,26 +847,33 @@ function JsonNode({
             </span>
           </div>
         )}
-        {!collapsed &&
-          entries.map(([childKey, childValue]) => (
-            <JsonNode
-              key={childKey}
-              name={childKey}
-              value={childValue}
-              level={level + 1}
-              treeCommandId={treeCommandId}
-              treeCommandMode={treeCommandMode}
-              nodeAction={nodeAction}
-              path={[...path, childKey]}
-              parentKind="object"
-              onEditValue={onEditValue}
-              onRenameKey={onRenameKey}
-              onAddToObject={onAddToObject}
-              onAddToArray={onAddToArray}
-              onDeleteAtPath={onDeleteAtPath}
-              onOpenContextMenu={onOpenContextMenu}
-            />
-          ))}
+        {!collapsed && (
+          <JsonList
+            items={entries}
+            renderItem={(entry, idx) => {
+              const [childKey, childValue] = entry as [string, unknown];
+              return (
+                <JsonNode
+                  key={childKey}
+                  name={childKey}
+                  value={childValue}
+                  level={level + 1}
+                  treeCommandId={treeCommandId}
+                  treeCommandMode={treeCommandMode}
+                  nodeAction={nodeAction}
+                  path={[...path, childKey]}
+                  parentKind="object"
+                  onEditValue={onEditValue}
+                  onRenameKey={onRenameKey}
+                  onAddToObject={onAddToObject}
+                  onAddToArray={onAddToArray}
+                  onDeleteAtPath={onDeleteAtPath}
+                  onOpenContextMenu={onOpenContextMenu}
+                />
+              );
+            }}
+          />
+        )}
       </div>
     );
   }
