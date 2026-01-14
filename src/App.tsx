@@ -28,6 +28,7 @@ import { loadTabsState, saveTabsState } from './utils/tabStorage';
 
 const THEME_STORAGE_KEY = 'json-formatter-theme';
 const INPUT_STORAGE_KEY = 'json-formatter:last-input';
+const LAYOUT_WIDTH_KEY = 'json-formatter:layout-width';
 
 type JsonTabState = {
   id: string;
@@ -436,6 +437,79 @@ const OutputPanel = React.memo(function OutputPanel({
 
 function App() {
   const { locale, setLocale, t } = useI18n();
+  const [leftPanelWidth, setLeftPanelWidth] = useState(() => {
+    if (typeof localStorage === 'undefined') return 38;
+    const saved = localStorage.getItem(LAYOUT_WIDTH_KEY);
+    const parsed = Number(saved);
+    return !Number.isNaN(parsed) && parsed > 10 && parsed < 90 ? parsed : 38;
+  });
+  const [isResizing, setIsResizing] = useState(false);
+  const gridRef = useRef<HTMLDivElement>(null);
+
+  const startResizing = useCallback(() => {
+    setIsResizing(true);
+  }, []);
+
+  const stopResizing = useCallback(() => {
+    setIsResizing(false);
+  }, []);
+
+  const resetLayout = useCallback(() => {
+    setLeftPanelWidth(38);
+  }, []);
+
+  useEffect(() => {
+    if (!isResizing) {
+      try {
+        localStorage.setItem(LAYOUT_WIDTH_KEY, String(leftPanelWidth));
+      } catch {
+        // ignore
+      }
+    }
+  }, [isResizing, leftPanelWidth]);
+
+  const resize = useCallback(
+    (e: MouseEvent) => {
+      if (isResizing && gridRef.current) {
+        const gridRect = gridRef.current.getBoundingClientRect();
+        const totalWidth = gridRect.width;
+        // 最小宽度 400px，保证内容不崩
+        const minPx = 500;
+
+        // 计算百分比
+        const rawPercent = ((e.clientX - gridRect.left) / totalWidth) * 100;
+
+        // 计算基于像素的百分比限制
+        const minPercent = (minPx / totalWidth) * 100;
+        const maxPercent = 100 - minPercent;
+
+        // 如果窗口太小导致无法满足最小宽度，则回退到 15%-85% 安全范围
+        const safeMin = Math.max(minPercent, 15);
+        const safeMax = Math.min(maxPercent, 85);
+
+        if (rawPercent >= safeMin && rawPercent <= safeMax) {
+          setLeftPanelWidth(rawPercent);
+        }
+      }
+    },
+    [isResizing],
+  );
+
+  useEffect(() => {
+    if (isResizing) {
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = 'col-resize';
+      window.addEventListener('mousemove', resize);
+      window.addEventListener('mouseup', stopResizing);
+    }
+    return () => {
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      window.removeEventListener('mousemove', resize);
+      window.removeEventListener('mouseup', stopResizing);
+    };
+  }, [isResizing, resize, stopResizing]);
+
   const [tabs, setTabs] = useState<JsonTabState[]>(() => {
     const stored = loadTabsState();
     const hydratedTabs: JsonTabState[] = stored.tabs.map((tab) => ({
@@ -1120,7 +1194,11 @@ function App() {
               }}
             />
 
-            <div className="tool-grid">
+            <div
+              className="tool-grid"
+              ref={gridRef}
+              style={{ gridTemplateColumns: `${leftPanelWidth}% 10px minmax(0, 1fr)` }}
+            >
               <div className="panel">
                 <div className="panel-header">
                   <span className="panel-header-title">
@@ -1290,6 +1368,12 @@ function App() {
                   </div>
                 </div>
               </div>
+
+              <div
+                className={`layout-resizer ${isResizing ? 'is-resizing' : ''}`}
+                onMouseDown={startResizing}
+                onDoubleClick={resetLayout}
+              />
 
               <OutputPanel
                 displayValue={displayValue}

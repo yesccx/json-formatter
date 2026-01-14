@@ -430,11 +430,32 @@ body {
 .tool-grid {
   margin-top: 1rem;
   display: grid;
-  /* 左侧 INPUT JSON 约占 1/4，右侧结果占 3/4 */
-  grid-template-columns: minmax(0, 15fr) minmax(0, 25fr);
-  gap: 1.25rem;
   flex: 1;
   min-height: 0;
+}
+
+.layout-resizer {
+  width: 10px;
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.layout-resizer::after {
+  content: '';
+  width: 4px;
+  height: 32px;
+  border-radius: 4px;
+  background: var(--border-subtle);
+  transition: all 0.2s;
+}
+
+.layout-resizer:hover::after,
+.layout-resizer.is-resizing::after {
+  background: var(--tab-indicator);
+  height: 100%;
 }
 
 .panel {
