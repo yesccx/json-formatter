@@ -9,11 +9,13 @@ import {
   IconCopy,
   IconExpand,
   IconGlobe,
+  IconPlus,
   IconSparkles,
   IconTable,
   IconTrash,
   IconTree,
 } from './components/Icons';
+import { TabsBar } from './components/TabsBar';
 import { useI18n } from './i18n/I18nProvider';
 import type { Locale } from './i18n/messages';
 import {
@@ -22,9 +24,22 @@ import {
   FormatRecord,
   loadHistory,
 } from './utils/historyStorage';
+import { loadTabsState, saveTabsState } from './utils/tabStorage';
 
 const THEME_STORAGE_KEY = 'json-formatter-theme';
 const INPUT_STORAGE_KEY = 'json-formatter:last-input';
+
+type JsonTabState = {
+  id: string;
+  title: string;
+  input: string;
+  parsed: unknown | null;
+  lastValid: unknown | null;
+  error: string | null;
+  formatError: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -421,21 +436,46 @@ const OutputPanel = React.memo(function OutputPanel({
 
 function App() {
   const { locale, setLocale, t } = useI18n();
-  const [input, setInput] = useState(() => {
-    if (typeof window === 'undefined') return '';
-    try {
-      return window.localStorage.getItem(INPUT_STORAGE_KEY) ?? '';
-    } catch {
-      return '';
-    }
+  const [tabs, setTabs] = useState<JsonTabState[]>(() => {
+    const stored = loadTabsState();
+    const hydratedTabs: JsonTabState[] = stored.tabs.map((tab) => ({
+      id: tab.id,
+      title: tab.title,
+      input: tab.input,
+      parsed: null,
+      lastValid: null,
+      error: null,
+      formatError: null,
+      createdAt: tab.createdAt,
+      updatedAt: tab.updatedAt,
+    }));
+    return hydratedTabs.length
+      ? hydratedTabs
+      : [
+          {
+            id: `${Date.now()}-tab-1`,
+            title: 'Tab 1',
+            input: '',
+            parsed: null,
+            lastValid: null,
+            error: null,
+            formatError: null,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ];
   });
-  const [parsed, setParsed] = useState<unknown | null>(null);
-  const [lastValid, setLastValid] = useState<unknown | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [activeTabId, setActiveTabId] = useState<string | null>(() => {
+    const stored = loadTabsState();
+    const hasActive = stored.activeId && stored.tabs.some((t) => t.id === stored.activeId);
+    if (hasActive) return stored.activeId;
+    return stored.tabs[0]?.id ?? null;
+  });
   const [history, setHistory] = useState<FormatRecord[]>([]);
-  const [formatError, setFormatError] = useState<string | null>(null);
-  const undoStackRef = useRef<string[]>([]);
-  const redoStackRef = useRef<string[]>([]);
+  const undoRedoRef = useRef<Map<string, { undo: string[]; redo: string[] }>>(
+    new Map(),
+  );
+  const activeTabIdRef = useRef<string | null>(activeTabId);
   const currentInputRef = useRef('');
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window === 'undefined') {
@@ -460,6 +500,19 @@ function App() {
       : 'light';
   });
 
+  const activeTab = useMemo(() => {
+    if (!tabs.length) return null;
+    if (!activeTabId) return tabs[0];
+    const found = tabs.find((t) => t.id === activeTabId);
+    return found ?? tabs[0];
+  }, [tabs, activeTabId]);
+
+  const input = activeTab?.input ?? '';
+  const parsed = activeTab?.parsed ?? null;
+  const lastValid = activeTab?.lastValid ?? null;
+  const error = activeTab?.error ?? null;
+  const formatError = activeTab?.formatError ?? null;
+
   const [inputSizeText, setInputSizeText] = useState('0.00KB');
 
   useEffect(() => {
@@ -474,6 +527,19 @@ function App() {
       // ignore
     }
   }, [input]);
+
+  useEffect(() => {
+    saveTabsState({
+      activeId: activeTabId,
+      tabs: tabs.map((tab) => ({
+        id: tab.id,
+        title: tab.title,
+        input: tab.input,
+        createdAt: tab.createdAt,
+        updatedAt: tab.updatedAt,
+      })),
+    });
+  }, [tabs, activeTabId]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -542,6 +608,9 @@ function App() {
   useEffect(() => {
     currentInputRef.current = input;
   }, [input]);
+  useEffect(() => {
+    activeTabIdRef.current = activeTabId;
+  }, [activeTabId]);
 
   useEffect(() => {
     const text = input ?? '';
@@ -602,34 +671,63 @@ function App() {
       if (tag === 'textarea' || tag === 'input' || tag === 'select') {
         return;
       }
+      const tabId = activeTabIdRef.current;
+      if (!tabId) return;
+
+      const stacks = undoRedoRef.current.get(tabId);
+      if (!stacks) return;
 
       if (isUndo) {
-        const stack = undoStackRef.current;
-        if (stack.length === 0) return;
+        const { undo, redo } = stacks;
+        if (!undo.length) return;
         e.preventDefault();
         const current = currentInputRef.current;
-        const prev = stack.pop();
+        const prev = undo.pop();
         if (prev === undefined) return;
-        redoStackRef.current.push(current);
-        if (redoStackRef.current.length > 100) {
-          redoStackRef.current.shift();
+        redo.push(current);
+        if (redo.length > 100) {
+          redo.shift();
         }
-        setInput(prev);
+        setTabs((prevTabs) => {
+          if (!prevTabs.length) return prevTabs;
+          return prevTabs.map((tab) =>
+            tab.id === tabId
+              ? {
+                  ...tab,
+                  input: prev,
+                  updatedAt: Date.now(),
+                }
+              : tab,
+          );
+        });
+        currentInputRef.current = prev;
         return;
       }
 
       if (isRedo) {
-        const stack = redoStackRef.current;
-        if (stack.length === 0) return;
+        const { undo, redo } = stacks;
+        if (!redo.length) return;
         e.preventDefault();
         const current = currentInputRef.current;
-        const next = stack.pop();
+        const next = redo.pop();
         if (next === undefined) return;
-        undoStackRef.current.push(current);
-        if (undoStackRef.current.length > 100) {
-          undoStackRef.current.shift();
+        undo.push(current);
+        if (undo.length > 100) {
+          undo.shift();
         }
-        setInput(next);
+        setTabs((prevTabs) => {
+          if (!prevTabs.length) return prevTabs;
+          return prevTabs.map((tab) =>
+            tab.id === tabId
+              ? {
+                  ...tab,
+                  input: next,
+                  updatedAt: Date.now(),
+                }
+              : tab,
+          );
+        });
+        currentInputRef.current = next;
       }
     };
 
@@ -639,94 +737,220 @@ function App() {
 
   useEffect(() => {
     const trimmed = input.trim();
+    const targetTabId = activeTab?.id ?? null;
+    if (!targetTabId) return;
 
     if (!trimmed) {
-      setParsed(null);
-      setLastValid(null);
-      setError(null);
+      setTabs((prevTabs) =>
+        prevTabs.map((tab) =>
+          tab.id === targetTabId
+            ? {
+                ...tab,
+                parsed: null,
+                lastValid: null,
+                error: null,
+              }
+            : tab,
+        ),
+      );
       return;
     }
 
-    const id = window.setTimeout(() => {
+    const timeoutId = window.setTimeout(() => {
       try {
         const decoded = decodeNestedJson(trimmed);
-        setParsed(decoded);
-        setLastValid(decoded);
-        setError(null);
+        setTabs((prevTabs) =>
+          prevTabs.map((tab) =>
+            tab.id === targetTabId
+              ? {
+                  ...tab,
+                  parsed: decoded,
+                  lastValid: decoded,
+                  error: null,
+                }
+              : tab,
+          ),
+        );
         setHistory(addRecord(trimmed));
       } catch (e) {
-        if (e instanceof NestedJsonError) {
-          setError(t('error.parseFailed', { message: e.message }));
-        } else {
-          setError(t('error.parseFailedUnknown'));
-        }
-        setParsed(null);
+        setTabs((prevTabs) =>
+          prevTabs.map((tab) => {
+            if (tab.id !== targetTabId) return tab;
+            const message =
+              e instanceof NestedJsonError
+                ? t('error.parseFailed', { message: e.message })
+                : t('error.parseFailedUnknown');
+            return {
+              ...tab,
+              parsed: null,
+              error: message,
+            };
+          }),
+        );
       }
     }, 300);
 
-    return () => window.clearTimeout(id);
+    return () => window.clearTimeout(timeoutId);
   }, [input]);
 
   const handleClearInput = () => {
     if (!input) return;
-    redoStackRef.current = [];
-    setInput('');
+    const tabId = activeTab?.id;
+    if (!tabId) return;
+    const stacks = undoRedoRef.current.get(tabId);
+    if (stacks) {
+      stacks.redo = [];
+    }
+    setTabs((prevTabs) =>
+      prevTabs.map((tab) =>
+        tab.id === tabId
+          ? {
+              ...tab,
+              input: '',
+              parsed: null,
+              lastValid: null,
+              error: null,
+              formatError: null,
+              updatedAt: Date.now(),
+            }
+          : tab,
+      ),
+    );
   };
 
   const handleToggleTheme = () => {
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   };
 
+  const handleAddTab = () => {
+    setTabs((prevTabs) => {
+      let maxNum = 0;
+      prevTabs.forEach((t) => {
+        const m = t.title.match(/^Tab\s+(\d+)$/);
+        if (m) {
+          const n = parseInt(m[1], 10);
+          if (n > maxNum) maxNum = n;
+        }
+      });
+      const nextNum = maxNum + 1;
+
+      const now = Date.now();
+      const newId = `${now}-tab-${nextNum}`;
+      const nextTab: JsonTabState = {
+        id: newId,
+        title: `Tab ${nextNum}`,
+        input: '',
+        parsed: null,
+        lastValid: null,
+        error: null,
+        formatError: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      setActiveTabId(newId);
+      return [...prevTabs, nextTab];
+    });
+  };
+
   const handleFormatInput = () => {
+    const tabId = activeTab?.id;
+    if (!tabId) return;
     const trimmed = input.trim();
     if (!trimmed) return;
     try {
       const decoded = decodeNestedJson(trimmed);
       const formatted = JSON.stringify(decoded, null, 2);
-      redoStackRef.current = [];
-      setInput(formatted);
-      setFormatError(null);
+      const existing = undoRedoRef.current.get(tabId) ?? {
+        undo: [],
+        redo: [],
+      };
+      existing.redo = [];
+      undoRedoRef.current.set(tabId, existing);
+      setTabs((prevTabs) =>
+        prevTabs.map((tab) =>
+          tab.id === tabId
+            ? {
+                ...tab,
+                input: formatted,
+                parsed: decoded,
+                lastValid: decoded,
+                error: null,
+                formatError: null,
+                updatedAt: Date.now(),
+              }
+            : tab,
+        ),
+      );
     } catch (e) {
-      if (e instanceof NestedJsonError) {
-        setFormatError(t('error.parseFailed', { message: e.message }));
-      } else {
-        setFormatError(t('error.parseFailedUnknown'));
-      }
+      const message =
+        e instanceof NestedJsonError
+          ? t('error.parseFailed', { message: e.message })
+          : t('error.parseFailedUnknown');
+      const targetId = tabId;
+      setTabs((prevTabs) =>
+        prevTabs.map((tab) =>
+          tab.id === targetId
+            ? {
+                ...tab,
+                formatError: message,
+              }
+            : tab,
+        ),
+      );
     }
   };
 
   const pushUndoSnapshot = useCallback(() => {
-    undoStackRef.current.push(currentInputRef.current);
-    if (undoStackRef.current.length > 100) {
-      undoStackRef.current.shift();
+    const tabId = activeTabIdRef.current;
+    if (!tabId) return;
+    const map = undoRedoRef.current;
+    let stacks = map.get(tabId);
+    if (!stacks) {
+      stacks = { undo: [], redo: [] };
+      map.set(tabId, stacks);
     }
-    redoStackRef.current = [];
+    stacks.undo.push(currentInputRef.current);
+    if (stacks.undo.length > 100) {
+      stacks.undo.shift();
+    }
+    stacks.redo = [];
   }, []);
 
-  const commitParsedUpdate = useCallback((updated: unknown) => {
-    setParsed(updated);
-    setError(null);
-    try {
-      setInput(JSON.stringify(updated, null, 2));
-    } catch {
-      // ignore
-    }
-  }, []);
+  const commitParsedUpdate = useCallback(
+    (targetTabId: string, updated: unknown) => {
+      setTabs((prevTabs) =>
+        prevTabs.map((tab) => {
+          if (tab.id !== targetTabId) return tab;
+          let nextInput = tab.input;
+          try {
+            nextInput = JSON.stringify(updated, null, 2);
+          } catch {
+            // ignore
+          }
+          return {
+            ...tab,
+            parsed: updated,
+            lastValid: updated,
+            error: null,
+            input: nextInput,
+            updatedAt: Date.now(),
+          };
+        }),
+      );
+    },
+    [],
+  );
 
   const handleEditValue = useCallback(
     (path: JsonPathSegment[], nextValue: unknown) => {
       if (parsed === null || error) return;
+      const tabId = activeTab?.id;
+      if (!tabId) return;
       pushUndoSnapshot();
       const updated = updateAtPath(parsed, path, nextValue);
-      setParsed(updated);
-      setError(null);
-      try {
-        setInput(JSON.stringify(updated, null, 2));
-      } catch {
-        // ignore
-      }
+      commitParsedUpdate(tabId, updated);
     },
-    [error, parsed, pushUndoSnapshot],
+    [activeTab?.id, commitParsedUpdate, error, parsed, pushUndoSnapshot],
   );
 
   const handleEditAtPointer = useCallback(
@@ -744,35 +968,41 @@ function App() {
       if (parsed === null || error) return;
       const trimmedKey = key.trim();
       if (!trimmedKey) return;
+      const tabId = activeTab?.id;
+      if (!tabId) return;
       pushUndoSnapshot();
       const updated = addToObjectAtPath(parsed, objectPath, trimmedKey, value);
       if (updated === parsed) return;
-      commitParsedUpdate(updated);
+      commitParsedUpdate(tabId, updated);
     },
-    [commitParsedUpdate, error, parsed, pushUndoSnapshot],
+    [activeTab?.id, commitParsedUpdate, error, parsed, pushUndoSnapshot],
   );
 
   const handleAddToArray = useCallback(
     (arrayPath: JsonPathSegment[], value: unknown) => {
       if (parsed === null || error) return;
+      const tabId = activeTab?.id;
+      if (!tabId) return;
       pushUndoSnapshot();
       const updated = addToArrayAtPath(parsed, arrayPath, value);
       if (updated === parsed) return;
-      commitParsedUpdate(updated);
+      commitParsedUpdate(tabId, updated);
     },
-    [commitParsedUpdate, error, parsed, pushUndoSnapshot],
+    [activeTab?.id, commitParsedUpdate, error, parsed, pushUndoSnapshot],
   );
 
   const handleDeleteAtPath = useCallback(
     (path: JsonPathSegment[]) => {
       if (parsed === null || error) return;
       if (!path.length) return;
+      const tabId = activeTab?.id;
+      if (!tabId) return;
       pushUndoSnapshot();
       const updated = deleteAtPath(parsed, path);
       if (updated === parsed) return;
-      commitParsedUpdate(updated);
+      commitParsedUpdate(tabId, updated);
     },
-    [commitParsedUpdate, error, parsed, pushUndoSnapshot],
+    [activeTab?.id, commitParsedUpdate, error, parsed, pushUndoSnapshot],
   );
 
   const handleRenameKey = useCallback(
@@ -780,13 +1010,15 @@ function App() {
       if (parsed === null || error) return;
       const trimmed = newKey.trim();
       if (!trimmed) return;
+      const tabId = activeTab?.id;
+      if (!tabId) return;
 
       pushUndoSnapshot();
       const updated = renameKeyAtPath(parsed, parentPath, oldKey, trimmed);
       if (updated === parsed) return;
-      commitParsedUpdate(updated);
+      commitParsedUpdate(tabId, updated);
     },
-    [commitParsedUpdate, error, parsed, pushUndoSnapshot],
+    [activeTab?.id, commitParsedUpdate, error, parsed, pushUndoSnapshot],
   );
 
   const displayValue = error ? lastValid : parsed;
@@ -839,6 +1071,55 @@ function App() {
               </div>
             </div>
 
+            <TabsBar
+              tabs={tabs.map((tab) => ({
+                id: tab.id,
+                title: tab.title,
+                hasError: !!tab.error,
+              }))}
+              activeId={activeTab?.id ?? null}
+              onSelect={(id) => {
+                setActiveTabId(id);
+              }}
+              onAdd={handleAddTab}
+              onClose={(id) => {
+                setTabs((prevTabs) => {
+                  if (!prevTabs.length) return prevTabs;
+                  const index = prevTabs.findIndex((tab) => tab.id === id);
+                  if (index === -1) return prevTabs;
+
+                  const nextTabs = prevTabs.filter((tab) => tab.id !== id);
+                  undoRedoRef.current.delete(id);
+
+                  if (!nextTabs.length) {
+                    const now = Date.now();
+                    const newId = `${now}-tab-1`;
+                    const singleTab: JsonTabState = {
+                      id: newId,
+                      title: 'Tab 1',
+                      input: '',
+                      parsed: null,
+                      lastValid: null,
+                      error: null,
+                      formatError: null,
+                      createdAt: now,
+                      updatedAt: now,
+                    };
+                    setActiveTabId(newId);
+                    return [singleTab];
+                  }
+
+                  if (activeTabId === id) {
+                    const nextIndex = index < nextTabs.length ? index : nextTabs.length - 1;
+                    const nextActiveId = nextTabs[nextIndex].id;
+                    setActiveTabId(nextActiveId);
+                  }
+
+                  return nextTabs;
+                });
+              }}
+            />
+
             <div className="tool-grid">
               <div className="panel">
                 <div className="panel-header">
@@ -847,6 +1128,19 @@ function App() {
                     <span className="panel-header-size">{inputSizeText}</span>
                   </span>
                   <div className="panel-header-actions">
+                    {tabs.length <= 1 && (
+                      <button
+                        type="button"
+                        className="panel-header-btn panel-header-btn-secondary"
+                        onClick={handleAddTab}
+                        title={t('tabs.newTab')}
+                      >
+                        <span className="btn-content">
+                          <IconPlus className="btn-icon" />
+                          <span>{t('tabs.newTab')}</span>
+                        </span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="panel-header-btn panel-header-btn-secondary"
@@ -877,11 +1171,25 @@ function App() {
                     placeholder={t('input.placeholder')}
                     value={input}
                     onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
-                      if (redoStackRef.current.length) {
-                        redoStackRef.current = [];
-                      }
-                      setInput(e.target.value);
-                      if (formatError) setFormatError(null);
+                      const tabId = activeTab?.id;
+                      if (!tabId) return;
+                      const map = undoRedoRef.current;
+                      const stacks = map.get(tabId) ?? { undo: [], redo: [] };
+                      stacks.redo = [];
+                      map.set(tabId, stacks);
+                      const nextValue = e.target.value;
+                      setTabs((prevTabs) =>
+                        prevTabs.map((tab) =>
+                          tab.id === tabId
+                            ? {
+                                ...tab,
+                                input: nextValue,
+                                formatError: null,
+                                updatedAt: Date.now(),
+                              }
+                            : tab,
+                        ),
+                      );
                     }}
                     spellCheck={false}
                   />
@@ -933,7 +1241,30 @@ function App() {
                               <button
                                 type="button"
                                 className="history-item-btn"
-                                onClick={() => setInput(item.input)}
+                                onClick={() => {
+                                  const tabId = activeTab?.id;
+                                  if (!tabId) return;
+                                  const map = undoRedoRef.current;
+                                  const stacks = map.get(tabId) ?? {
+                                    undo: [],
+                                    redo: [],
+                                  };
+                                  stacks.redo = [];
+                                  map.set(tabId, stacks);
+                                  const nextValue = item.input;
+                                  setTabs((prevTabs) =>
+                                    prevTabs.map((tab) =>
+                                      tab.id === tabId
+                                        ? {
+                                            ...tab,
+                                            input: nextValue,
+                                            formatError: null,
+                                            updatedAt: Date.now(),
+                                          }
+                                        : tab,
+                                    ),
+                                  );
+                                }}
                               >
                                 <span className="history-item-time">
                                   <span className="btn-content">

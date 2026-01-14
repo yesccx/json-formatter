@@ -114,6 +114,12 @@ export const MESSAGES: Record<Locale, Messages> = {
     'jsonpath.copyRow': '复制行',
     'jsonpath.copyCell': '复制单元格',
     'jsonpath.editCell': '编辑单元格',
+
+    'tabs.closeOthers': '关闭其他',
+    'tabs.closeRight': '关闭右侧',
+    'tabs.closeLeft': '关闭左侧',
+    'tabs.closeAll': '关闭所有',
+    'tabs.newTab': '新窗口',
   },
   en: {
     'seo.title': 'JSON Formatter - Local JSON formatter & nested decoder',
@@ -200,6 +206,12 @@ export const MESSAGES: Record<Locale, Messages> = {
     'jsonpath.copyRow': 'Copy row',
     'jsonpath.copyCell': 'Copy cell',
     'jsonpath.editCell': 'Edit cell and sync to JSON',
+
+    'tabs.closeOthers': 'Close Others',
+    'tabs.closeRight': 'Close to the Right',
+    'tabs.closeLeft': 'Close to the Left',
+    'tabs.closeAll': 'Close All',
+    'tabs.newTab': 'New Tab',
   },
 } as const;
 

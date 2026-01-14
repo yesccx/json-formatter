@@ -27,6 +27,7 @@
   --border-subtle: #1e293b;
   --accent: #38bdf8;
   --accent-soft: rgba(56, 189, 248, 0.16);
+  --tab-indicator: #818cf8; /* Indigo for better harmony */
   --text: #e5e7eb;
   --text-muted: #9ca3af;
   --danger: #f97373;
@@ -43,6 +44,7 @@
   --border-subtle: rgba(148, 163, 184, 0.45);
   --accent: #2563eb;
   --accent-soft: rgba(37, 99, 235, 0.12);
+  --tab-indicator: #6366f1; /* Indigo 500 */
   --text: #0f172a;
   --text-muted: #6b7280;
   --danger: #e11d48;
@@ -100,6 +102,240 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+/* Minimalist & Flat Tabs Design */
+
+.modern-tabs-bar {
+  display: flex;
+  align-items: flex-end;
+  width: 100%;
+  height: 36px;
+  padding: 6px 12px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.modern-tabs-bar.is-hidden {
+  height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  opacity: 0;
+  transform: translateY(-8px);
+  border-bottom-color: transparent;
+  pointer-events: none;
+}
+
+.modern-tabs-scroll {
+  display: flex;
+  align-items: flex-end;
+  flex: 1;
+  overflow-x: auto;
+  scrollbar-width: none;
+  gap: 2px;
+  margin-bottom: -1px; /* Overlap border-bottom */
+  padding-right: 12px;
+}
+
+.modern-tabs-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.modern-tab-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 28px;
+  min-width: 90px;
+  max-width: 160px;
+  padding: 0 6px 0 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-subtle);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease;
+  user-select: none;
+  outline: none;
+  margin-top: 2px;
+  overflow: hidden; /* Clip inner accent line */
+}
+
+/* Hover state */
+.modern-tab-item:hover {
+  background: rgba(148, 163, 184, 0.08);
+  color: var(--text);
+}
+
+/* Active state */
+.modern-tab-item.modern-tab-active {
+  background: var(--bg-card);
+  color: var(--text);
+  border-color: var(--border-subtle);
+  border-bottom-color: var(--bg-card);
+  box-shadow: none;
+  font-weight: 500;
+  margin-top: 0;
+  height: 28px;
+}
+
+/* Active top indicator (inner line) */
+.modern-tab-item.modern-tab-active::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--tab-indicator);
+  animation: tab-indicator-in 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes tab-indicator-in {
+  from {
+    transform: scaleX(0);
+    opacity: 0;
+  }
+  to {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+}
+
+/* Simple content layout */
+.modern-tab-content {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.modern-tab-text {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
+.modern-tab-error-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--danger);
+  flex-shrink: 0;
+}
+
+/* Close button - always visible on hover, simplified */
+.modern-tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: all 0.1s;
+  margin-left: 0;
+}
+
+.modern-tab-item:hover .modern-tab-close,
+.modern-tab-active .modern-tab-close {
+  opacity: 0.6;
+}
+
+.modern-tab-close:hover {
+  background: rgba(248, 113, 113, 0.1);
+  color: var(--danger);
+  opacity: 1 !important;
+}
+
+.close-icon-svg {
+  width: 10px;
+  height: 10px;
+  display: block; /* Eliminate SVG baseline issues */
+}
+
+/* Add button - simplified inline */
+.modern-tab-add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-left: 4px;
+  margin-bottom: 2px;
+  border: 1px dashed transparent;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.1s;
+  flex-shrink: 0;
+}
+
+.modern-tab-add-btn:hover {
+  border-color: var(--border-subtle);
+  background: rgba(148, 163, 184, 0.06);
+  color: var(--text);
+}
+
+.add-icon-svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Light mode adjustments */
+[data-theme='light'] .modern-tab-item {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+[data-theme='light'] .modern-tab-item:hover {
+  background: rgba(255, 255, 255, 0.6);
+  border-color: rgba(148, 163, 184, 0.6);
+}
+
+[data-theme='light'] .modern-tab-item.modern-tab-active {
+  background: var(--bg-card);
+  border-color: var(--border-subtle);
+  border-bottom-color: var(--bg-card);
+}
+
+.tab-title-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.tab-title {
+  max-width: 8.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Legacy error dot removed */
+
+/* Legacy styles removed */
+
+[data-theme='light'] .tab-add-btn:hover {
+  background: #e0f2fe;
+}
+
+.tab-add-btn:active {
+  transform: scale(0.98);
+}
+
+.tab-add-icon {
+  width: 0.95rem;
+  height: 0.95rem;
 }
 
 .tool-card-actions {
@@ -1923,3 +2159,42 @@ body,
     gap: 0.4rem;
   }
 }
+
+/* Tabs Context Menu */
+.tabs-context-menu {
+  position: fixed;
+  z-index: 1000;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  padding: 4px 0;
+  min-width: 140px;
+  backdrop-filter: blur(12px);
+}
+
+.tabs-context-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 8px 16px;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.1s;
+  border: none;
+  background: transparent;
+  text-align: left;
+}
+
+.tabs-context-menu-item:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.tabs-context-menu-separator {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 4px 0;
+}
+
